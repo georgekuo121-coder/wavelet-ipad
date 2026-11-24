@@ -26,7 +26,8 @@
 
   /* ---------- Vinyl view ---------- */
   #vinyl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); align-items: center; gap: 4vw; }
-  #discWrap { position: relative; aspect-ratio: 1; width: min(42vw, 78vh); justify-self: center; }
+  #discWrap { position: relative; aspect-ratio: 1; width: min(42vw, 78vh); justify-self: center; touch-action: none; cursor: grab; }
+  #discWrap:active { cursor: grabbing; }
   #info { display: flex; flex-direction: column; gap: 2.2vh; min-width: 0; }
   .eyebrow { font-size: 12px; letter-spacing: .28em; font-weight: 700; opacity: .6; }
   #title { font-size: clamp(28px, 4.6vw, 64px); font-weight: 800; line-height: 1.05; letter-spacing: -.01em;
@@ -469,9 +470,73 @@ function frame(t) {
   if (!document.body.classList.contains('lyrics')) drawVinyl(t, dt); else drawWaves(t);
   requestAnimationFrame(frame);
 }
+/* ---------- spin the record by hand: it scratches, but only the picture moves (the song keeps playing) ---------- */
+const SPIN_BASE = Math.PI * 2 * (33.3 / 60); // normal turntable speed, rad/s
+let spinV = 0, grab = null, sx = null;
+const ptrAngle = (e, c) => Math.atan2(e.clientY - c.cy, e.clientX - c.cx);
+function spinStep(dt, playing) {
+  const base = playing ? SPIN_BASE : 0;
+  if (grab) { // the finger drives the record; its speed decays when the finger stops moving
+    grab.v *= Math.pow(0.0005, dt); spinV = grab.v;
+  } else { spinV += (base - spinV) * Math.min(1, dt * 2.2); angle += spinV * dt; } // coast back to normal speed
+  scratchUpdate(spinV - base, !!grab);
+}
+function scratchInit() { // a small synth: filtered noise (the hiss) + a low buzz (the "wiki-wiki" body)
+  if (sx) { if (sx.ctx.state !== 'running') sx.ctx.resume().catch(() => {}); return; }
+  try { if (navigator.audioSession && !sndOn) navigator.audioSession.type = 'ambient'; } catch {} // mix with Spotify, don't stop it
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+  const ctx = new AC(), out = ctx.createGain(); out.gain.value = 0; out.connect(ctx.destination);
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.002 ? 3 : 1); // hiss with a few crackles
+  const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4; bp.frequency.value = 800;
+  const nG = ctx.createGain(); nG.gain.value = 0.55; noise.connect(bp).connect(nG).connect(out);
+  const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 60;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500; lp.Q.value = 4;
+  const oG = ctx.createGain(); oG.gain.value = 0.35; osc.connect(lp).connect(oG).connect(out);
+  noise.start(); osc.start();
+  sx = { ctx, out, bp, osc, lp, lvl: 0 };
+}
+function scratchUpdate(rel, held) {
+  if (!sx) return;
+  const k = Math.min(1, Math.abs(rel) / (SPIN_BASE * 3)); // 0 = normal speed, 1 = fast scratch
+  const lvl = k < 0.04 ? 0 : (0.15 + 0.85 * k) * (held ? 1 : 0.6), t = sx.ctx.currentTime;
+  if (Math.abs(lvl - sx.lvl) > 0.01) { sx.out.gain.setTargetAtTime(lvl * 0.5, t, 0.02); sx.lvl = lvl; }
+  if (lvl) {
+    sx.bp.frequency.setTargetAtTime(500 + k * 3500 + (rel < 0 ? -200 : 0), t, 0.02);
+    sx.osc.frequency.setTargetAtTime(45 + k * 220 * (rel < 0 ? 0.8 : 1), t, 0.02);
+    sx.lp.frequency.setTargetAtTime(300 + k * 1800, t, 0.02);
+  }
+}
+function scratchTick(v = 0.25) { // the needle thump when you touch / let go
+  if (!sx) return;
+  const c = sx.ctx, o = c.createOscillator(), gn = c.createGain(), t = c.currentTime;
+  o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.08);
+  gn.gain.setValueAtTime(v, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  o.connect(gn).connect(c.destination); o.start(t); o.stop(t + 0.12);
+}
+$('discWrap').addEventListener('pointerdown', (e) => {
+  const c = discRect();
+  if (Math.hypot(e.clientX - c.cx, e.clientY - c.cy) > c.R * 1.05) return;
+  e.preventDefault(); try { $('discWrap').setPointerCapture(e.pointerId); } catch {}
+  scratchInit(); scratchTick();
+  grab = { id: e.pointerId, a: ptrAngle(e, c), t: performance.now(), v: 0 };
+});
+$('discWrap').addEventListener('pointermove', (e) => {
+  if (!grab || e.pointerId !== grab.id) return;
+  const c = discRect(), a = ptrAngle(e, c), now = performance.now();
+  let da = a - grab.a; if (da > Math.PI) da -= Math.PI * 2; else if (da < -Math.PI) da += Math.PI * 2;
+  angle += da;
+  const dt = Math.max(0.008, (now - grab.t) / 1000);
+  grab.v = grab.v * 0.4 + (da / dt) * 0.6; grab.a = a; grab.t = now;
+});
+const release = (e) => { if (!grab || e.pointerId !== grab.id) return; spinV = grab.v; grab = null; scratchTick(0.12); };
+$('discWrap').addEventListener('pointerup', release);
+$('discWrap').addEventListener('pointercancel', release);
+
 function drawVinyl(t, dt) {
   const { cx, cy, R } = discRect(), playing = media.status === 'Playing';
-  if (playing) angle += dt * (Math.PI * 2) * (33.3 / 60);
+  spinStep(dt, playing);
   const beat = Math.max(0, 1 - (t - beatT) / 260), [ar, ag, ab] = accent;
   // soft light behind the disc
   const glow = g.createRadialGradient(cx, cy, R * 0.6, cx, cy, R * 1.9);

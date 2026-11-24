@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wavelet">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Wavelet</title>
+<style>
+  :root { --acc: 255,255,255; --safe-t: env(safe-area-inset-top); --safe-b: env(safe-area-inset-bottom); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
+    font-family: -apple-system, "SF Pro Display", "PingFang TC", "Segoe UI", "Microsoft JhengHei", sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-font-smoothing: antialiased; }
+  #bg { position: fixed; inset: -12%; background-size: cover; background-position: center;
+    filter: blur(70px) saturate(1.5) brightness(.55); transform: scale(1.1); transition: background-image 1.2s;
+    animation: drift 40s ease-in-out infinite alternate; }
+  @keyframes drift { from { transform: scale(1.1) rotate(0deg); } to { transform: scale(1.3) rotate(8deg); } }
+  #shade { position: fixed; inset: 0; background: radial-gradient(ellipse at 30% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,.55) 75%); }
+  canvas#fx { position: fixed; inset: 0; width: 100%; height: 100%; }
+  .ui { position: fixed; inset: 0; padding: calc(28px + var(--safe-t)) 40px calc(28px + var(--safe-b)); }
+
+  /* ---------- Vinyl view ---------- */
+  #vinyl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); align-items: center; gap: 4vw; }
+  #discWrap { position: relative; aspect-ratio: 1; width: min(42vw, 78vh); justify-self: center; }
+  #info { display: flex; flex-direction: column; gap: 2.2vh; min-width: 0; }
+  .eyebrow { font-size: 12px; letter-spacing: .28em; font-weight: 700; opacity: .6; }
+  #title { font-size: clamp(28px, 4.6vw, 64px); font-weight: 800; line-height: 1.05; letter-spacing: -.01em;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #artist { font-size: clamp(16px, 2vw, 26px); opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lyr { min-height: 18vh; display: flex; flex-direction: column; justify-content: center; gap: 1vh; }
+  #lyrCur { font-size: clamp(22px, 3.1vw, 42px); font-weight: 700; line-height: 1.2; transition: opacity .3s; }
+  #lyrNext { font-size: clamp(15px, 1.8vw, 24px); opacity: .4; line-height: 1.25; }
+  .seek { display: flex; align-items: center; gap: 12px; font-size: 13px; font-variant-numeric: tabular-nums; opacity: .85; }
+  .trk { position: relative; flex: 1; height: 28px; display: flex; align-items: center; }
+  .trk:before { content: ''; position: absolute; left: 0; right: 0; height: 5px; border-radius: 3px; background: rgba(255,255,255,.2); }
+  .trk i { position: absolute; left: 0; height: 5px; border-radius: 3px; background: #fff; }
+  .ctl { display: flex; align-items: center; gap: 22px; }
+  .ctl button { border: 0; background: rgba(255,255,255,.12); color: #fff; width: 58px; height: 58px; border-radius: 50%;
+    display: grid; place-items: center; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); cursor: pointer; }
+  .ctl button.big { width: 76px; height: 76px; background: #fff; color: #000; }
+  .ctl button:active { transform: scale(.92); }
+  .ctl svg { width: 24px; height: 24px; fill: currentColor; }
+  .ctl .big svg { width: 32px; height: 32px; }
+  #next { display: flex; flex-direction: column; gap: 10px; margin-top: 1vh; }
+  #next .row { display: flex; align-items: center; gap: 12px; opacity: .75; }
+  #next .row:nth-child(2) { opacity: .5; } #next .row:nth-child(3) { opacity: .3; }
+  #next img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: rgba(255,255,255,.1); }
+  #next b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #next span { font-size: 12px; opacity: .7; }
+
+  /* ---------- Lyrics view ---------- */
+  #big { display: none; flex-direction: column; justify-content: center; }
+  #bigLines { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 2.4vh; overflow: hidden; }
+  #bigLines p { margin: 0; font-weight: 800; letter-spacing: -.01em; line-height: 1.15; transition: all .45s cubic-bezier(.2,.8,.2,1); transform-origin: left center; }
+  #bigLines p.prev { font-size: clamp(20px, 2.6vw, 34px); opacity: .25; }
+  #bigLines p.cur { font-size: clamp(36px, 6vw, 86px); }
+  #bigLines p.cur span { background: linear-gradient(90deg, #fff var(--p, 0%), rgba(255,255,255,.35) var(--p, 0%));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #bigLines p.nxt { font-size: clamp(22px, 3vw, 40px); opacity: .35; }
+  #bigFoot { display: flex; align-items: center; gap: 16px; }
+  #bigFoot img { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; }
+  #bigFoot b { display: block; font-size: 18px; } #bigFoot span { opacity: .65; font-size: 14px; }
+  body.lyrics #vinyl { display: none; } body.lyrics #big { display: flex; }
+
+  #top { position: fixed; top: calc(14px + var(--safe-t)); right: 18px; display: flex; gap: 10px; z-index: 5; transition: opacity .6s; }
+  #top button { border: 0; border-radius: 18px; padding: 8px 14px; font: 600 13px inherit; font-family: inherit;
+    background: rgba(255,255,255,.14); color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #top button.on { background: #fff; color: #000; }
+  body.idle #top { opacity: 0; }
+  body.sp #snd { display: none; }
+  #leadBtn { display: none; } body.sp #leadBtn { display: block; }
+  #frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: transparent; z-index: 2; }
+  body.pc #frame { display: block; } body.pc #vinyl, body.pc #big, body.pc canvas#fx { display: none !important; }
+  #styleBtn { display: none; } body.pc #styleBtn { display: block; }
+  #menu { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.45); display: none; align-items: flex-end; justify-content: center; }
+  #menu.on { display: flex; }
+  #menu .sheet { width: min(760px, 100%); max-height: 72vh; overflow: auto; margin: 0 12px calc(16px + var(--safe-b)); padding: 18px;
+    border-radius: 22px; background: rgba(28,28,32,.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  #menu .hd { font-weight: 700; font-size: 15px; opacity: .7; margin: 0 4px 12px; }
+  #menu .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  #menu .grid button { border: 0; border-radius: 14px; padding: 14px 12px; text-align: left; color: #fff; background: rgba(255,255,255,.08); font: inherit; }
+  #menu .grid button b { display: block; font-size: 15px; } #menu .grid button span { display: block; font-size: 12px; opacity: .55; margin-top: 3px; }
+  #menu .grid button.on { background: #fff; color: #000; }
+  #status { position: fixed; left: 50%; bottom: calc(18px + var(--safe-b)); transform: translateX(-50%); font-size: 13px;
+    background: rgba(0,0,0,.6); padding: 8px 14px; border-radius: 16px; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #status.on { opacity: 1; }
+  @media (orientation: portrait) {
+    #vinyl { grid-template-columns: 1fr; grid-template-rows: auto 1fr; gap: 3vh; align-items: start; }
+    #discWrap { width: min(70vw, 46vh); margin-top: 2vh; }
+    #info { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<div id="bg"></div><div id="shade"></div>
+<canvas id="fx"></canvas>
+<iframe id="frame" title="Wavelet"></iframe>
+<div id="top"><button id="snd">🔈 開聲音</button><button id="leadBtn">字幕</button><button id="viewBtn">畫面</button><button id="styleBtn">樣式</button><button id="fs">全螢幕</button></div>
+<div id="menu"><div class="sheet"><div class="hd" id="menuTitle"></div><div class="grid" id="menuGrid"></div></div></div>
+
+<div class="ui" id="vinyl">
+  <div id="discWrap"></div>
+  <div id="info">
+    <div class="eyebrow" id="eyebrow">NOW PLAYING</div>
+    <div id="title">—</div>
+    <div id="artist"></div>
+    <div id="lyr"><div id="lyrCur"></div><div id="lyrNext"></div></div>
+    <div class="seek"><span id="tCur">0:00</span><div class="trk" id="trk"><i id="bar"></i></div><span id="tDur">0:00</span></div>
+    <div class="ctl">
+      <button data-c="prev" aria-label="上一首"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button data-c="play" class="big" id="playBtn" aria-label="播放/暫停"><svg viewBox="0 0 24 24" id="playIco"></svg></button>
+      <button data-c="next" aria-label="下一首"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    </div>
+    <div id="next"></div>
+  </div>
+</div>
+
+<div class="ui" id="big">
+  <div id="bigLines"></div>
+  <div id="bigFoot"><img id="bigCover" alt=""><div><b id="bigTitle"></b><span id="bigArtist"></span></div></div>
+</div>
+<div id="status"></div>
+
+<script src="config.js"></script>
+<script src="solo.js"></script>
+<script>
+const K = new URLSearchParams(location.search).get('k') || '';
+const $ = (id) => document.getElementById(id);
+const PLAY = '<path d="M7 4v16l13-8z"/>', PAUSE = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>';
+let media = {}, cover = '', lyrics = { lines: [] }, queue = [], opts = { offset: 0, songOffset: 0 };
+let off = 0;                      // PC clock minus this device's clock
+let spec = new Array(48).fill(0), lvl = 0, bass = 0, beatT = 0, lastAudio = 0;
+const smooth = new Array(48).fill(0);
+
+/* ---------- live stream from the PC ---------- */
+function status(t, on) { $('status').textContent = t; $('status').classList.toggle('on', !!on); }
+// Where the data comes from: the PC (Server-Sent Events below) or, in the stand-alone iPad build,
+// solo.js talking to Spotify and lrclib directly. Both feed the same entry points.
+const SOLO = window.WvSolo || null;
+const IN = {
+  media(m) { media = m; off = (media.now || Date.now()) - Date.now(); setSource(); renderMeta(); Hub.emitMedia(); },
+  cover(c) { cover = c || ''; renderCover(); Hub.emitMedia(); },
+  lyrics(l) { lyrics = l; lastLine = -2; Hub.emit('lyrics', lyrics); },
+  spotify(d) { queue = d.queue || []; renderQueue(); Hub.spotify = d; Hub.emit('spotify', d); },
+  settings(s) { Hub.pc = s; Hub.emit('settings', Hub.settings()); },
+  opts(o) { opts = o; },
+  status,
+};
+function connect() {
+  if (SOLO) return SOLO.start(IN);
+  const es = new EventSource('/events?k=' + encodeURIComponent(K));
+  es.onopen = () => status('', false);
+  es.onerror = () => status('連不到電腦上的 Wavelet，重新連線中…', true);
+  for (const ev of ['media', 'cover', 'lyrics', 'spotify', 'settings', 'opts']) es.addEventListener(ev, (e) => IN[ev](JSON.parse(e.data)));
+  es.addEventListener('a', (e) => { if (document.body.classList.contains('sp')) return; const a = decodeAudio(JSON.parse(e.data)); if (sndOn) aq.push({ t: performance.now(), a }); else applyAudio(a); });
+}
+const cmd = (c, extra = '') => SOLO ? SOLO.cmd(c, +((/[?&]t=([\d.]+)/.exec(extra) || [])[1] || 0))
+  : fetch('/cmd?k=' + encodeURIComponent(K) + '&c=' + c + extra, { method: 'POST' }).catch(() => {});
+
+const b64 = (s) => { const bin = atob(s || ''), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+function decodeAudio(a) {
+  const f = b64(a.f), w = b64(a.w), s48 = new Array(48);
+  for (let i = 0; i < 48; i++) s48[i] = f[Math.floor(i * f.length / 48)] | 0;
+  return { s48, l: a.l, b: a.b, beat: a.beat, full: { f, w: w.length ? w : new Uint8Array(256).fill(128), level: a.l, bass: a.b, mid: a.m, treble: a.t, flux: a.x, beat: !!a.beat } };
+}
+function applyAudio(a) { spec = a.s48; lvl = a.l; bass = a.b; if (a.beat) beatT = performance.now(); lastAudio = performance.now(); Hub.emit('audio', a.full); }
+
+/* ---------- hub: feeds the PC's own renderers running in the iframe (see web-api.js) ---------- */
+const Hub = window.WvHub = {
+  pc: null, spotify: { connected: false, queue: [] }, subs: [], lastDelay: 0,
+  local: (() => { try { return JSON.parse(localStorage.getItem('wv-local')) || null; } catch { return null; } })() || { lyrics: { enabled: true } },
+  merge(a, b) { for (const k in b) { if (b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object') this.merge(a[k], b[k]); else a[k] = b[k]; } return a; },
+  settings() { return this.pc ? this.merge(JSON.parse(JSON.stringify(this.pc)), this.local) : null; },
+  patchLocal(p) { this.merge(this.local, JSON.parse(JSON.stringify(p))); try { localStorage.setItem('wv-local', JSON.stringify(this.local)); } catch {} this.emit('settings', this.settings()); renderMenu(); },
+  // The iframe runs on this device's clock and, with sound on, should lag the PC by the sound delay.
+  media() { const m = { ...media, cover }; if (m.updated) m.updated = m.updated - off + delay * 1000 - leadNow() * 1000; return m; },
+  emitMedia() { this.lastDelay = delay; this.emit('media', this.media()); },
+  snapshot() { return { settings: this.settings(), media: this.media(), lyrics, spotify: this.spotify, stats: null, weather: null, sys: null, covered: false, editMode: false }; },
+  on(ch, cb, win) { this.subs.push({ ch, cb, win }); },
+  emit(ch, d) {
+    this.subs = this.subs.filter((s) => { try { return !s.win.closed && !!s.win.frameElement; } catch { return false; } });
+    for (const s of this.subs) if (s.ch === ch) { try { s.cb(d); } catch (e) { console.log(e); } }
+  },
+  cmd(c, a) {
+    if (c === 'media' && ['play', 'next', 'prev'].includes(a)) cmd(a);
+    else if (c === 'seek') cmd('seek', '&t=' + Math.max(0, +a || 0).toFixed(2));
+    return true;
+  },
+};
+
+/* ---------- sound: the PC streams what it is playing; this page plays it ---------- */
+// Raw 16-bit stereo arrives over a streaming fetch and is scheduled back to back with Web Audio.
+// Everything on screen (bars, lyrics, progress) is held back by the same delay so it stays in sync.
+const rlog = (msg) => window.WvSolo ? null : fetch('/log?k=' + encodeURIComponent(K) + '&m=' + encodeURIComponent(msg), { method: 'POST' }).catch(() => {});
+let sndFirst = false, sndBytes = 0, sndTimer = 0;
+let actx = null, sndOn = false, sndAbort = null, playhead = 0, target = 0.3, rate = 48000, delay = 0;
+const aq = [], sndStats = { under: 0, drop: 0 };
+function sndButton(t) { $('snd').textContent = t || (sndOn ? '🔊 聲音開啟' : '🔈 開聲音'); $('snd').classList.toggle('on', sndOn); }
+function sndPlay(bytes) {
+  const s = new Int16Array(bytes.buffer, 0, bytes.length >> 1), n = s.length >> 1;
+  if (!n || !actx) return;
+  const now = actx.currentTime;
+  if (playhead < now + 0.02) { if (playhead) sndStats.under++, target = Math.min(0.8, target + 0.05); playhead = now + target; } // ran dry: rebuild a cushion
+  else if (playhead > now + target + 0.25) { sndStats.drop++; return; } // fell behind (clock drift / backlog): skip a chunk to catch up
+  const buf = actx.createBuffer(2, n, rate), L = buf.getChannelData(0), R = buf.getChannelData(1);
+  for (let i = 0; i < n; i++) { L[i] = s[i * 2] / 32768; R[i] = s[i * 2 + 1] / 32768; }
+  const src = actx.createBufferSource(); src.buffer = buf; src.connect(actx.destination); src.start(playhead);
+  playhead += n / rate;
+}
+let sndHidden = false, sndLoop = false;
+async function sndStream() {
+  if (sndLoop) return; sndLoop = true;
+  while (sndOn && !sndHidden) {
+    sndAbort = new AbortController(); playhead = 0; target = 0.3;
+    try {
+      const r = await fetch('/pcm?k=' + encodeURIComponent(K), { signal: sndAbort.signal, cache: 'no-store' });
+      rlog('pcm response ' + r.status + ' body=' + !!r.body + ' rate=' + r.headers.get('X-Rate'));
+      if (!r.ok || !r.body) throw new Error('http ' + r.status);
+      rate = +r.headers.get('X-Rate') || rate; sndButton();
+      const rd = r.body.getReader(); let rest = null;
+      for (;;) {
+        const { value, done } = await rd.read(); if (done || !sndOn) { rlog('pcm stream ended done=' + done + ' on=' + sndOn); break; }
+        sndBytes += value.length; if (!sndFirst) { sndFirst = true; rlog('first audio bytes ' + value.length + ' ctx=' + (actx && actx.state)); }
+        let b = value; if (rest) { b = new Uint8Array(rest.length + value.length); b.set(rest); b.set(value, rest.length); }
+        const use = b.length - (b.length % 4);
+        sndPlay(b.slice(0, use)); rest = use < b.length ? b.slice(use) : null;
+      }
+    } catch (e) { rlog('pcm error ' + (e && (e.name + ': ' + e.message))); }
+    if (sndOn && !sndHidden) { sndButton('🔈 重新連線…'); await new Promise((r) => setTimeout(r, 1500)); }
+  }
+  sndLoop = false;
+}
+// In the background iOS stops the sound anyway; let go of the stream so the PC speakers come back, and pick it up again on return.
+document.addEventListener('visibilitychange', () => {
+  if (!sndOn) return;
+  if (document.visibilityState === 'hidden') { sndHidden = true; if (sndAbort) sndAbort.abort(); rlog('page hidden: sound stream released'); }
+  else { sndHidden = false; playhead = 0; if (actx && actx.state !== 'running') actx.resume().catch(() => {}); rlog('page visible: ctx ' + (actx && actx.state)); sndStream(); }
+});
+function sndStart() {
+  sndOn = true; target = 0.3; sndButton('🔈 連線中…');
+  // iOS: play even when the iPad is in silent mode (Safari 16.4+), like a music app.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  const AC = window.AudioContext || window.webkitAudioContext;
+  actx = new AC();
+  actx.onstatechange = () => {
+    if (!actx) return; rlog('ctx ' + actx.state);
+    if (actx.state === 'running') { playhead = 0; sndButton(); } else if (sndOn) sndButton('🔈 點一下恢復聲音');
+  };
+  rlog('sound on: ctx ' + actx.state + ' ' + actx.sampleRate + 'Hz, audioSession=' + (navigator.audioSession ? navigator.audioSession.type : 'none') + ', ' + navigator.userAgent.slice(0, 120));
+  // iOS only lets sound start inside a tap: play one silent sample right now to unlock it.
+  const b = actx.createBuffer(1, 1, 22050), s = actx.createBufferSource(); s.buffer = b; s.connect(actx.destination); s.start(0);
+  actx.resume();
+  try { localStorage.setItem('wv-sound', '1'); } catch {}
+  sndStream();
+}
+function sndStop() {
+  rlog('sound off');
+  sndOn = false; if (sndAbort) sndAbort.abort();
+  if (actx) { actx.close().catch(() => {}); actx = null; }
+  aq.splice(0).forEach((x) => applyAudio(x.a)); delay = 0;
+  try { localStorage.setItem('wv-sound', '0'); } catch {}
+  sndButton();
+}
+$('snd').addEventListener('click', (e) => { e.stopPropagation(); sndOn ? sndStop() : sndStart(); });
+// Sound was on last time: iOS still needs a tap, so the first tap anywhere turns it back on.
+let sndWant = false; try { sndWant = localStorage.getItem('wv-sound') === '1'; } catch {}
+if (sndWant) sndButton('🔈 點一下畫面開聲音');
+addEventListener('pointerdown', (e) => {
+  if (sndWant && !sndOn && e.target.id !== 'snd' && !document.body.classList.contains('sp')) { sndWant = false; sndStart(); }
+  if (sndOn && actx && actx.state !== 'running') actx.resume();
+});
+function sndDelay() { // how far the sound coming out of the iPad lags behind the PC, smoothed
+  if (!sndOn || !actx || !playhead) return delay;
+  const raw = Math.max(0, playhead - actx.currentTime) + (actx.outputLatency || actx.baseLatency || 0) + 0.06;
+  delay += (raw - delay) * 0.05; return delay;
+}
+
+/* ---------- Spotify playing on this iPad (or another device): follow it ---------- */
+// The PC switches the feed to Spotify's "now playing" by itself. There is no sound to analyse then,
+// so the bars get a steady beat that follows the song position instead.
+const spMode = () => document.body.classList.contains('sp');
+let lyrLead = 0.5;
+try { const v = localStorage.getItem('wv-sp-lead'); if (v !== null && !isNaN(+v)) lyrLead = +v; } catch {}
+const leadNow = () => (spMode() && media.status === 'Playing' ? lyrLead : 0);
+function leadLabel() { $('leadBtn').textContent = '字幕 ' + (lyrLead > 0 ? '提前 ' : lyrLead < 0 ? '延後 ' : '') + (lyrLead ? Math.abs(lyrLead) + ' 秒' : '準時'); }
+function setLead(v) { lyrLead = v; try { localStorage.setItem('wv-sp-lead', String(v)); } catch {} leadLabel(); lastLine = -2; Hub.emitMedia(); }
+function setSource() {
+  const spm = media.source === 'spotify';
+  if (spm !== document.body.classList.contains('sp')) {
+    document.body.classList.toggle('sp', spm);
+    if (spm && sndOn) sndStop();
+  }
+  $('eyebrow').textContent = spm ? 'NOW PLAYING · ' + (media.device || 'SPOTIFY').toUpperCase() : 'NOW PLAYING';
+}
+let simT = 0, simBeat = -1;
+const simF = new Uint8Array(128), simW = new Uint8Array(256);
+const hashStr = (s) => { let x = 2166136261; for (const c of String(s)) x = Math.imul(x ^ c.charCodeAt(0), 16777619); return x >>> 0; };
+function simFrame(t) {
+  if (t - simT < 33) return; simT = t;
+  const playing = media.status === 'Playing';
+  const bpm = 92 + (hashStr(media.title + '|' + media.artist) % 37); // steady per song, 92–128
+  const p = position(), ph = p * bpm / 60, k = Math.floor(ph), fr = ph - k;
+  const beat = playing && k !== simBeat && fr < 0.3; if (beat) simBeat = k;
+  const kick = playing ? Math.exp(-fr * 5) : 0, hat = playing ? Math.exp(-((ph * 2) % 1) * 9) : 0;
+  let sum = 0;
+  for (let i = 0; i < 128; i++) {
+    const x = i / 127;
+    const body = Math.pow(1 - x, 1.3) * (0.42 + 0.28 * Math.sin(p * 1.7 + i * 0.35) * Math.sin(p * 0.6 + i * 0.11));
+    const low = x < 0.12 ? kick * (1 - x / 0.12) * 0.8 : 0;
+    const high = x > 0.6 ? hat * 0.25 * (0.6 + 0.4 * Math.sin(i * 1.3 + p * 9)) : 0;
+    const v = playing ? Math.max(0, Math.min(1, (body + low + high) * (0.82 + 0.18 * Math.random()))) : 0;
+    simF[i] = v * 255; sum += v;
+  }
+  for (let i = 0; i < 256; i++) simW[i] = 128 + (playing ? Math.round((Math.sin(i * 0.19 + p * 30) * 0.5 * kick + Math.sin(i * 0.73 + p * 47) * 0.2) * 100) : 0);
+  const lvl = sum / 128, bv = playing ? 0.2 + kick * 0.6 : 0;
+  const s48 = new Array(48); for (let i = 0; i < 48; i++) s48[i] = simF[Math.floor(i * 128 / 48)];
+  applyAudio({ s48, l: lvl, b: bv, beat, full: { f: simF.slice(), w: simW.slice(), level: lvl, bass: bv, mid: lvl * 0.8, treble: hat * 0.4, flux: kick * 0.1, beat } });
+}
+
+/* ---------- now playing ---------- */
+const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function position() {
+  const m = media, pcNow = Date.now() + off;
+  const p = (m.position || 0) + (m.status === 'Playing' ? (pcNow - (m.updated || pcNow)) / 1000 - delay + leadNow() : 0);
+  return m.duration ? Math.min(p, m.duration) : p;
+}
+function renderMeta() {
+  const has = !!media.title;
+  $('title').textContent = has ? media.title : '目前沒有播放中的音樂';
+  $('artist').textContent = media.artist || '';
+  $('bigTitle').textContent = media.title || ''; $('bigArtist').textContent = media.artist || '';
+  $('playIco').innerHTML = media.status === 'Playing' ? PAUSE : PLAY;
+  $('tDur').textContent = fmt(media.duration);
+}
+const coverImg = new Image(); let coverReady = false;
+function renderCover() {
+  $('bg').style.backgroundImage = cover ? `url("${cover}")` : 'none';
+  $('bigCover').src = cover || ''; $('bigCover').style.visibility = cover ? 'visible' : 'hidden';
+  coverReady = false;
+  if (cover) { coverImg.onload = () => { coverReady = true; pickAccent(); }; coverImg.src = cover; }
+}
+function pickAccent() {
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d'); x.drawImage(coverImg, 0, 0, 16, 16);
+    const d = x.getImageData(0, 0, 16, 16).data; let best = [255, 255, 255], score = -1;
+    for (let i = 0; i < d.length; i += 4) { const r = d[i], g = d[i + 1], b = d[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b); const s = (mx - mn) * (mx / 255); if (s > score) { score = s; best = [r, g, b]; } }
+    if (score < 40) best = [255, 255, 255];
+    accent = best;
+  } catch { accent = [255, 255, 255]; }
+}
+let accent = [255, 255, 255];
+function renderQueue() {
+  $('next').innerHTML = queue.length ? '<div class="eyebrow">UP NEXT</div>' + queue.slice(0, 3).map((t) =>
+    `<div class="row"><img src="${esc(t.image)}" alt=""><div style="min-width:0"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div></div>`).join('') : '';
+}
+
+/* ---------- lyrics ---------- */
+let lastLine = -2;
+function lineAt(p) {
+  const L = lyrics.lines || []; let i = -1;
+  for (let k = 0; k < L.length; k++) { if (L[k].t <= p) i = k; else break; }
+  return i;
+}
+function renderLyrics() {
+  const L = lyrics.lines || [];
+  const p = position() + 0.25 + (opts.offset || 0) + (opts.songOffset || 0);
+  const i = lineAt(p);
+  if (!L.length) {
+    const msg = lyrics.loading ? '' : (media.title ? (lyrics.plain ? '' : '這首歌沒有同步歌詞') : '');
+    if (lastLine !== -3) { $('lyrCur').textContent = msg; $('lyrNext').textContent = ''; $('bigLines').innerHTML = `<p class="cur"><span style="--p:100%">${esc(msg || media.title || '')}</span></p>`; lastLine = -3; }
+    return;
+  }
+  if (i !== lastLine) {
+    lastLine = i;
+    const cur = i >= 0 ? L[i].text : '', nxt = L[i + 1] ? L[i + 1].text : '';
+    $('lyrCur').textContent = cur || '♪'; $('lyrNext').textContent = nxt;
+    $('bigLines').innerHTML = `<p class="prev">${esc(i > 0 ? L[i - 1].text : '')}</p><p class="cur"><span>${esc(cur || '♪')}</span></p><p class="nxt">${esc(nxt)}</p><p class="nxt" style="opacity:.18">${esc(L[i + 2] ? L[i + 2].text : '')}</p>`;
+  }
+  // sweep the current line from left to right across its duration
+  const span = document.querySelector('#bigLines p.cur span');
+  if (span && i >= 0) {
+    const t0 = L[i].t, t1 = L[i + 1] ? L[i + 1].t : t0 + 4, dur = Math.max(0.5, Math.min(t1 - t0, 8));
+    span.style.setProperty('--p', Math.min(100, Math.max(0, (p - t0) / dur * 100)).toFixed(1) + '%');
+  }
+}
+
+/* ---------- visuals: spinning vinyl with a halo of light bars ---------- */
+const cv = $('fx'), g = cv.getContext('2d'); let W = 0, H = 0, DPR = 1, angle = 0, lastT = performance.now();
+function resize() { DPR = Math.min(2, window.devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; }
+addEventListener('resize', resize); resize();
+function discRect() { const r = $('discWrap').getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, R: r.width / 2 * 0.78 }; }
+function frame(t) {
+  const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+  if (document.body.classList.contains('sp')) simFrame(t);
+  const D = sndDelay() * 1000;
+  while (aq.length && t - aq[0].t >= D) applyAudio(aq.shift().a);
+  if (aq.length > 120) aq.splice(0, aq.length - 120);
+  const live = t - lastAudio < 500;
+  for (let i = 0; i < 48; i++) smooth[i] += ((live ? spec[i] / 255 : 0) - smooth[i]) * (spec[i] / 255 > smooth[i] ? 0.55 : 0.12);
+  g.setTransform(DPR, 0, 0, DPR, 0, 0); g.clearRect(0, 0, W, H);
+  if (!document.body.classList.contains('pc')) renderLyrics();
+  const p = position(); $('bar').style.width = (media.duration ? Math.min(100, p / media.duration * 100) : 0) + '%'; $('tCur').textContent = fmt(p);
+  if (Math.abs(delay - Hub.lastDelay) > 0.03) Hub.emitMedia();
+  if (document.body.classList.contains('pc')) { requestAnimationFrame(frame); return; }
+  if (!document.body.classList.contains('lyrics')) drawVinyl(t, dt); else drawWaves(t);
+  requestAnimationFrame(frame);
+}
+function drawVinyl(t, dt) {
+  const { cx, cy, R } = discRect(), playing = media.status === 'Playing';
+  if (playing) angle += dt * (Math.PI * 2) * (33.3 / 60);
+  const beat = Math.max(0, 1 - (t - beatT) / 260), [ar, ag, ab] = accent;
+  // soft light behind the disc
+  const glow = g.createRadialGradient(cx, cy, R * 0.6, cx, cy, R * 1.9);
+  glow.addColorStop(0, `rgba(${ar},${ag},${ab},${0.22 + bass * 0.35})`); glow.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, R * 1.9, 0, Math.PI * 2); g.fill();
+  // mirrored radial bars
+  const N = 120; g.lineCap = 'round';
+  for (let i = 0; i < N; i++) {
+    const k = i < N / 2 ? i : N - 1 - i, v = smooth[Math.floor(k / (N / 2) * 40)] || 0;
+    const a = (i / N) * Math.PI * 2 - Math.PI / 2, len = R * (0.04 + v * 0.42 + beat * 0.04);
+    const r0 = R * 1.06;
+    g.strokeStyle = `rgba(255,255,255,${0.25 + v * 0.75})`; g.lineWidth = Math.max(1.5, R * 0.012);
+    g.shadowColor = `rgba(${ar},${ag},${ab},.9)`; g.shadowBlur = 10 * v;
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len)); g.stroke();
+  }
+  g.shadowBlur = 0;
+  // the record
+  const s = 1 + beat * 0.012;
+  g.save(); g.translate(cx, cy); g.scale(s, s); g.rotate(angle);
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 40;
+  g.fillStyle = '#0c0c0e'; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill(); g.shadowBlur = 0;
+  if (coverReady) { // picture disc: the cover printed across the whole record
+    g.save(); g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.clip(); g.globalAlpha = 0.92; g.drawImage(coverImg, -R, -R, R * 2, R * 2); g.restore();
+  }
+  for (let r = R * 0.98; r > R * 0.2; r -= R * 0.022) { // grooves
+    g.strokeStyle = `rgba(0,0,0,${0.12 + ((r / R * 37) % 1) * 0.08})`; g.lineWidth = 1; g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.stroke();
+  }
+  const sheen = g.createLinearGradient(-R, -R, R, R);
+  sheen.addColorStop(0.3, 'rgba(255,255,255,0)'); sheen.addColorStop(0.5, 'rgba(255,255,255,.16)'); sheen.addColorStop(0.7, 'rgba(255,255,255,0)');
+  g.rotate(-angle); g.fillStyle = sheen; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#111'; g.beginPath(); g.arc(0, 0, R * 0.045, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.stroke();
+  g.restore();
+}
+function drawWaves(t) { // lyrics mode: a quiet spectrum glow along the bottom
+  const [ar, ag, ab] = accent, n = 48, bw = W / n;
+  for (let i = 0; i < n; i++) {
+    const v = smooth[i], h = v * H * 0.28;
+    const gr = g.createLinearGradient(0, H, 0, H - h);
+    gr.addColorStop(0, `rgba(${ar},${ag},${ab},.55)`); gr.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
+    g.fillStyle = gr; g.fillRect(i * bw + 2, H - h, bw - 4, h);
+  }
+}
+
+/* ---------- controls ---------- */
+document.querySelectorAll('.ctl button').forEach((b) => b.addEventListener('click', () => {
+  const c = b.dataset.c; cmd(c);
+  if (c === 'play') { media.status = media.status === 'Playing' ? 'Paused' : 'Playing'; media.position = position(); media.updated = Date.now() + off; renderMeta(); }
+}));
+$('trk').addEventListener('click', (e) => {
+  if (!media.duration) return;
+  const r = e.currentTarget.getBoundingClientRect(), s = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * media.duration;
+  cmd('seek', '&t=' + s.toFixed(2)); media.position = s; media.updated = Date.now() + off;
+});
+// 唱片 / 歌詞 are drawn by this page; the rest are the PC's own pages, run here through web-api.js.
+const VIEWS = [
+  ['vinyl', '唱片', '旋轉唱片和光條'], ['lyrics', '歌詞', '大字逐行歌詞'],
+  ['stage', '歌詞舞台', '跟電腦一樣的逐字歌詞，14 種', 'stage.html'],
+  ['viz', '視覺化', '跟電腦一樣的視覺化小工具', 'widget.html'],
+  ['full', '全螢幕播放器', '模糊封面背景和漣漪', 'fullscreen.html'],
+];
+let view = 'vinyl', menuKind = '';
+function setView(v) {
+  const V = VIEWS.find((x) => x[0] === v) || VIEWS[0]; view = V[0];
+  document.body.classList.toggle('lyrics', view === 'lyrics');
+  document.body.classList.toggle('pc', !!V[3]);
+  const fr = $('frame'), src = V[3] ? (SOLO ? 'app/' : '/app/') + V[3] : 'about:blank';
+  if (fr.getAttribute('src') !== src) { Hub.subs = []; fr.setAttribute('src', src); }
+  $('viewBtn').textContent = '畫面：' + V[1];
+  try { localStorage.setItem('wv-view', view); } catch {}
+}
+function styleList() {
+  const fw = $('frame').contentWindow, s = Hub.settings() || {};
+  // Stage and Viz are top-level consts in the iframe, not window properties, so look them up by name.
+  const pick = (n) => { try { return fw.eval('typeof ' + n + ' !== "undefined" ? ' + n + ' : null'); } catch { return null; } };
+  const w = { Stage: pick('Stage'), Viz: pick('Viz') };
+  if (view === 'stage' && w.Stage) return { title: '歌詞舞台樣式', cur: s.stage && s.stage.style, items: w.Stage.STYLES.map(([n, g, d]) => [n, g + ' · ' + d]), pick: (n) => Hub.patchLocal({ stage: { style: n } }) };
+  if (view === 'viz' && w.Viz) return { title: '視覺化樣式（點畫面換外觀）', cur: s.vis && s.vis.style, items: w.Viz.ALL.map((n) => [n, '']), pick: (n) => Hub.patchLocal({ vis: { style: n, look: 0 } }) };
+  if (view === 'full' && w.Viz) return { title: '全螢幕播放器的光條樣式', cur: s.full && s.full.style, items: w.Viz.ALL.map((n) => [n, '']), pick: (n) => Hub.patchLocal({ full: { style: n } }) };
+  return null;
+}
+function renderMenu() {
+  if (!$('menu').classList.contains('on')) return;
+  let title, items, cur, pick;
+  if (menuKind === 'lead') {
+    title = '字幕時間：iPad 的 Spotify 回報進度會慢一點，字幕對不上時調這裡';
+    items = [-0.5, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => [String(v), v > 0 ? '字幕早一點出來' : v < 0 ? '字幕晚一點出來' : '照 Spotify 的時間', v > 0 ? '提前 ' + v + ' 秒' : v < 0 ? '延後 ' + -v + ' 秒' : '準時']);
+    cur = String(lyrLead); pick = (k) => { setLead(+k); renderMenu(); };
+  } else if (menuKind === 'view') { title = '選擇畫面'; items = VIEWS.map((v) => [v[0], v[2], v[1]]); cur = view; pick = (k) => { setView(k); closeMenu(); }; }
+  else { const L = styleList(); if (!L) return closeMenu(); title = L.title; cur = L.cur; items = L.items.map(([n, d]) => [n, d, n]); pick = L.pick; }
+  $('menuTitle').textContent = title;
+  $('menuGrid').innerHTML = items.map(([k, d, label]) => `<button data-k="${esc(k)}" class="${k === cur ? 'on' : ''}"><b>${esc(label)}</b>${d ? '<span>' + esc(d) + '</span>' : ''}</button>`).join('');
+  $('menuGrid').onclick = (e) => { const b = e.target.closest('button'); if (b) pick(b.dataset.k); };
+}
+function openMenu(kind) { menuKind = kind; $('menu').classList.add('on'); renderMenu(); }
+function closeMenu() { $('menu').classList.remove('on'); }
+$('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
+$('viewBtn').addEventListener('click', () => openMenu('view'));
+$('leadBtn').addEventListener('click', () => openMenu('lead'));
+leadLabel();
+$('styleBtn').addEventListener('click', () => openMenu('style'));
+$('fs').addEventListener('click', () => {
+  const d = document.documentElement, req = d.requestFullscreen || d.webkitRequestFullscreen;
+  if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else if (req) req.call(d); else status('在 Safari 按「分享」→「加入主畫面」，從主畫面打開就是全螢幕', true), setTimeout(() => status('', false), 4000);
+});
+let idleT; const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 4000); };
+addEventListener('pointerdown', wake); wake();
+
+/* keep the screen on while this page is showing */
+let lock = null;
+async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') lock = await navigator.wakeLock.request('screen'); } catch {} }
+document.addEventListener('visibilitychange', keepAwake); addEventListener('pointerdown', () => { if (!lock || lock.released) keepAwake(); });
+keepAwake();
+
+try { setView(localStorage.getItem('wv-view') || 'vinyl'); } catch { setView('vinyl'); }
+renderMeta(); connect(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

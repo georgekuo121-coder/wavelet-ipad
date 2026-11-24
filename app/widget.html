@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Wavelet</title>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;color:#fff;user-select:none}
+  #root{position:fixed;inset:0}
+  #backdrop{position:absolute;inset:0;border-radius:18px;background:rgba(10,10,16,var(--bd));backdrop-filter:blur(18px)}
+  .feather{-webkit-mask-image:linear-gradient(90deg,transparent,#000 var(--f),#000 calc(100% - var(--f)),transparent),linear-gradient(180deg,transparent,#000 var(--f),#000 calc(100% - var(--f)),transparent);-webkit-mask-composite:source-in;mask-composite:intersect}
+  #artglow{position:absolute;inset:0;filter:blur(40px) saturate(1.4);transition:opacity 1s}
+  #artglow img{width:100%;height:100%;object-fit:cover}
+  #viz{position:absolute;left:0;top:0;width:100%}
+  #lyric{bottom:0}
+  #np{position:absolute;left:14px;right:14px;bottom:10px;display:flex;align-items:center;gap:10px;min-width:0}
+  #np img{border-radius:8px;object-fit:cover;box-shadow:0 4px 18px rgba(0,0,0,.5);flex:none}
+  #np .tx{min-width:0;flex:1}
+  #np .t{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #np .a{font-size:12px;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #np .seek{margin-top:3px}
+  #np .ctl{display:none;flex:none}
+  body.wv-active #np .ctl{display:block}
+  #np.Centred{flex-direction:column;text-align:center;gap:2px} #np.Centred img{display:none} #np.Centred .tx{width:100%}
+  #np.Text img{display:none}
+  #np.Cover .t{font-size:16px}
+</style></head>
+<body>
+<div id="root">
+  <div id="backdrop"></div>
+  <div id="artglow" class="feather"><img alt=""></div>
+  <canvas id="viz" class="feather"></canvas>
+  <div id="lyric"></div>
+  <div id="np"><img alt=""><div class="tx"><div class="t"></div><div class="a"></div><div class="seek"></div></div><div class="ctl"></div></div>
+</div>
+<script src="web-api.js"></script><script src="common.js"></script>
+<script src="viz.js"></script>
+<script src="lyrics.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const cv = $('#viz'), np = $('#np'), lyr = Lyrics.mount($('#lyric'));
+const seek = Wv.seekBar($('#np .seek')), tp = Wv.transport($('#np .ctl'));
+const CARD = { Compact: 72, Centred: 66, Cover: 104, Text: 62 };
+let cardH = 0, look = 0;
+
+function layout() {
+  const s = Wv.st.s, v = s.vis, m = Wv.st.media, has = v.nowPlaying && m && m.title;
+  cardH = has ? (CARD[v.layout] || 72) - (v.seekBar ? 0 : 16) : 0;
+  np.style.display = has ? 'flex' : 'none';
+  np.className = v.layout;
+  $('#np .seek').style.display = v.seekBar ? 'block' : 'none';
+  const size = v.layout === 'Cover' ? 80 : 46;
+  np.querySelector('img').style.width = np.querySelector('img').style.height = size + 'px';
+  const tall = ['Fade', 'Stack'].includes(s.lyrics.style), ls = s.lyrics.size || 15;
+  const lyrH = s.lyrics.enabled && v.lyrics !== false && (Wv.st.lyrics.lines || []).length ? Math.round(ls * (tall ? 4.6 : 2)) : 0;
+  cv.style.height = `calc(100% - ${cardH + lyrH}px)`;
+  const ly = $('#lyric'); ly.style.display = lyrH ? '' : 'none'; ly.style.bottom = cardH + 'px'; ly.style.height = lyrH + 'px'; ly.style.fontSize = ls + 'px'; ly.style.opacity = s.lyrics.opacity ?? 1; ly.style.fontWeight = 600;
+  $('#root').style.opacity = v.opacity;
+  $('#root').style.setProperty('--f', Math.round((v.feather ?? 1) * 10) + '%');
+  $('#backdrop').style.setProperty('--bd', v.backdrop);
+  $('#artglow').style.opacity = v.artGlow && Wv.st.cover ? (v.artGlowAmount ?? 0.55) : 0;
+}
+Wv.on('settings', () => layout());
+Wv.on('lyrics', () => layout());
+Wv.on('media', (m) => {
+  np.querySelector('.t').textContent = m.title || '';
+  np.querySelector('.a').textContent = [m.artist, m.album].filter(Boolean).join(' — ');
+  layout();
+});
+Wv.on('cover', (img) => {
+  const src = img ? img.src : '';
+  np.querySelector('img').src = src; $('#artglow img').src = src;
+  np.querySelector('img').style.visibility = src ? 'visible' : 'hidden';
+  layout();
+});
+// Tap: next look of the current style. Double-tap: next visualizer.
+Wv.on('tap', () => { look++; });
+Wv.on('dbltap', () => {
+  const s = Wv.st.s, i = Viz.ALL.indexOf(s.vis.style);
+  api.patch({ vis: { style: Viz.ALL[(i + 1) % Viz.ALL.length], look: 0 } });
+});
+Wv.init().then(() => { Wv.editChrome(); layout(); });
+let uiT = 0;
+Wv.run((dt, t) => {
+  const s = Wv.st.s, v = s.vis, { g, w, h } = Wv.fit(cv), P = Wv.palette();
+  Viz.draw(v.style, g, w, h, Wv.A, P, t, { look: (v.look || 0) + look, density: v.density, glow: v.glow, dt, scale: v.scale, speed: v.speed, thick: v.thick, refl: v.reflection });
+  lyr.update(s.lyrics.style, P[1]);
+  if (t - uiT > 0.25) { uiT = t; seek.update(); tp.update(); np.style.setProperty('--seek', `linear-gradient(90deg, ${P[0]}, ${P[2]})`); }
+});
+</script>
+</body></html>

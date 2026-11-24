@@ -1,0 +1,104 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Wavelet</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#fff;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;cursor:default}
+  body.idle{cursor:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  #title{position:fixed;left:48px;top:40px;max-width:60vw;text-shadow:0 2px 20px rgba(0,0,0,.6)}
+  #title .t{font-size:34px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #title .a{font-size:18px;opacity:.75;margin-top:4px}
+  #lyric{bottom:150px;font-size:28px;font-weight:700;height:110px;display:flex;flex-direction:column;justify-content:flex-end}
+  #ctl{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);display:flex;gap:18px;transition:opacity .6s}
+  #seek{position:fixed;left:50%;bottom:122px;transform:translateX(-50%);width:min(640px,70vw);transition:opacity .6s;font-size:13px}
+  #seek .wv-seek{font-size:13px}
+  body.idle #ctl,body.idle #hint,body.idle #seek{opacity:0}
+  #ctl button{width:58px;height:58px;border-radius:50%;border:0;background:rgba(255,255,255,.12);color:#fff;font-size:22px;cursor:pointer;backdrop-filter:blur(12px)}
+  #ctl button:hover{background:rgba(255,255,255,.25)}
+  #ctl button.big{width:70px;height:70px;font-size:26px}
+  #hint{position:fixed;right:28px;bottom:26px;font-size:12px;opacity:.55;transition:opacity .6s;text-align:right;line-height:1.7}
+  #toast{position:fixed;left:50%;top:40px;transform:translateX(-50%);background:rgba(0,0,0,.5);padding:8px 16px;border-radius:20px;font-size:14px;opacity:0;transition:opacity .4s}
+</style></head>
+<body>
+<canvas id="bg"></canvas>
+<canvas id="fx"></canvas>
+<div id="title"><div class="t"></div><div class="a"></div></div>
+<div id="lyric"></div>
+<div id="seek"></div>
+<div id="ctl"><button id="prev">⏮</button><button id="play" class="big">⏯</button><button id="next">⏭</button></div>
+<div id="hint">Space 播放/暫停 · ← → 上/下一首 · Shift+← → 倒退/快轉 10 秒<br>V 換視覺化 · C 換配色 · Esc 離開</div>
+<div id="toast"></div>
+<script src="web-api.js"></script><script src="common.js"></script>
+<script src="viz.js"></script>
+<script src="lyrics.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const bg = $('#bg'), fx = $('#fx'), lyr = Lyrics.mount($('#lyric'));
+const COLORS = ['album', ...Object.keys(Wv.THEMES)];
+let ripples = [], idleT;
+function toast(t) { const e = $('#toast'); e.textContent = t; e.style.opacity = 1; clearTimeout(e._t); e._t = setTimeout(() => (e.style.opacity = 0), 1400); }
+function wake() { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2200); }
+addEventListener('mousemove', wake); wake();
+$('#prev').onclick = () => api.cmd('media', 'prev');
+$('#next').onclick = () => api.cmd('media', 'next');
+$('#play').onclick = () => api.cmd('media', 'play');
+addEventListener('keydown', (e) => {
+  const f = Wv.st.s.full;
+  if (e.key === 'Escape') api.cmd('fullscreen');
+  else if (e.key === ' ') { e.preventDefault(); api.cmd('media', 'play'); }
+  else if (e.key === 'ArrowLeft' && e.shiftKey) { api.cmd('seek', Wv.position() - 10); toast('⏪ 10 秒'); }
+  else if (e.key === 'ArrowRight' && e.shiftKey) { api.cmd('seek', Wv.position() + 10); toast('⏩ 10 秒'); }
+  else if (e.key === 'ArrowLeft') api.cmd('media', 'prev');
+  else if (e.key === 'ArrowRight') api.cmd('media', 'next');
+  else if (e.key.toLowerCase() === 'v') { const n = Viz.ALL[(Viz.ALL.indexOf(f.style) + 1) % Viz.ALL.length]; api.patch({ full: { style: n } }); toast(n); }
+  else if (e.key.toLowerCase() === 'c') { const n = COLORS[(COLORS.indexOf(f.colors) + 1) % COLORS.length]; api.patch({ full: { colors: n } }); toast(n === 'album' ? '專輯配色' : n); }
+});
+Wv.on('media', (m) => { $('#title .t').textContent = m.title || '沒有播放中的音樂'; $('#title .a').textContent = m.artist || ''; });
+const seek = Wv.seekBar($('#seek'));
+let driftT = 0;
+function drawBg(t, dt) {
+  const { g, w, h } = Wv.fit(bg), f = Wv.st.s.full, P = Wv.palette(f.colors);
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  const img = Wv.st.cover;
+  driftT += dt * (f.drift ?? 1);
+  if (img) {
+    // blurred, slowly drifting cover as the room light
+    const sc = 1.35 + Math.sin(driftT * 0.05) * 0.08, dx = Math.sin(driftT * 0.07) * w * 0.05, dy = Math.cos(driftT * 0.06) * h * 0.05;
+    const s = Math.max(w, h) * sc;
+    g.filter = `blur(${f.blur ?? 70}px) saturate(1.3) brightness(${f.brightness ?? 0.7})`;
+    g.drawImage(img, (w - s) / 2 + dx, (h - s) / 2 + dy, s, s);
+    g.filter = 'none';
+  } else {
+    const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
+    gr.addColorStop(0, Viz.alpha(P[1], 0.35)); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  }
+  g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, 0, w, h);
+}
+let lastBg = 0;
+Wv.init().then(() => {});
+Wv.run((dt, t) => {
+  const s = Wv.st.s, A = Wv.A, P = Wv.palette(s.full.colors), f = s.full;
+  if (t - lastBg > 1 / 30) { drawBg(t, t - lastBg); lastBg = t; }
+  const { g, w, h } = Wv.fit(fx);
+  const cs = Math.min(w, h) * 0.34 * (f.coverSize ?? 1), cx = w / 2, cy = h * 0.46;
+  $('#lyric').style.fontSize = (s.lyrics.fullSize || 28) + 'px'; $('#lyric').style.opacity = s.lyrics.opacity ?? 1;
+  seek.update(); $('#seek').style.setProperty('--seek', `linear-gradient(90deg, ${P[0]}, ${P[2]})`);
+  const style = s.full.style;
+  // viz layer
+  if (style === 'Ring') Viz.draw('Ring', g, w, h, A, P, t, { radius: cs * 0.62, cx, cy, ringMax: cs * 0.5, ringCover: false, glow: 0.8, density: 0.7 });
+  else { g.clearRect(0, 0, w, h); g.save(); g.translate(0, h * 0.62); Viz.draw(style, g, w, h * 0.38, A, P, t, { glow: 0.8, density: 0.6, dt }); g.restore(); }
+  // bass ripples out from the cover
+  if (A.beat && (f.ripple ?? 1) > 0) ripples.push({ r: cs * 0.5, a: 0.6 * Math.min(1.6, f.ripple ?? 1) });
+  ripples = ripples.filter((r) => r.a > 0.01);
+  for (const r of ripples) { r.r += dt * cs * 1.4; r.a *= 0.94; g.strokeStyle = Viz.alpha(P[1], r.a); g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, r.r, 0, Math.PI * 2); g.stroke(); }
+  // sharp cover in the middle
+  const img = Wv.st.cover, k = cs * (1 + A.pulse * 0.02);
+  g.save(); g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 50;
+  if (style === 'Ring') { g.beginPath(); g.arc(cx, cy, k * 0.55, 0, Math.PI * 2); g.clip(); }
+  else { g.beginPath(); g.roundRect(cx - k / 2, cy - k / 2, k, k, 18); g.clip(); }
+  if (img) g.drawImage(img, cx - k / 2, cy - k / 2, k, k);
+  else { g.fillStyle = Viz.alpha(P[1], 0.4); g.fillRect(cx - k / 2, cy - k / 2, k, k); }
+  g.restore();
+  lyr.update(s.lyrics.style, P[1]);
+});
+</script>
+</body></html>

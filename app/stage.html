@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Wavelet Lyrics</title>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;user-select:none}
+  #bg{position:fixed;inset:0;border-radius:22px;background:rgba(0,0,0,var(--dim,0));transition:background .3s}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+</style></head>
+<body>
+<div id="bg"></div>
+<canvas id="c"></canvas>
+<script src="web-api.js"></script><script src="common.js"></script>
+<script src="stage.js"></script>
+<script>
+// Word-by-word lyric stage (Verci-style). Lives on the wallpaper, on top, or as a click-through overlay.
+const cv = document.getElementById('c');
+function colors(st) {
+  const P = Wv.palette();
+  if (st.matchCover && Wv.st.coverPal) return { text: '#ffffff', hl: Wv.st.coverPal[1], sec: '#8e8e9c' };
+  return { text: st.textColor, hl: st.highlight, sec: st.secondary };
+}
+Wv.on('tap', () => { const st = Wv.st.s.stage, i = Stage.NAMES.indexOf(st.style); api.patch({ stage: { style: Stage.NAMES[(i + 1) % Stage.NAMES.length] } }); });
+Wv.init().then(() => Wv.editChrome());
+Wv.run((dt) => {
+  const s = Wv.st.s, st = s.stage, { g, w, h } = Wv.fit(cv);
+  document.body.style.setProperty('--dim', st.dim || 0);
+  cv.style.opacity = st.opacity ?? 1;
+  const offset = (s.lyrics.offset || 0) + (s.lyrics.songOffset || 0);
+  const playing = Wv.st.media && Wv.st.media.title;
+  Stage.draw(st.style, g, w, h,
+    { lyrics: Wv.st.lyrics, pos: Wv.position() + 0.15 + offset, demo: !playing && st.demoWhenIdle, dt, title: playing ? `${Wv.st.media.title} — ${Wv.st.media.artist || ''}` : '' },
+    { font: st.font, size: st.size, ...colors(st) });
+});
+</script>
+</body></html>

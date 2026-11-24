@@ -73,7 +73,6 @@
   #top button.on { background: #fff; color: #000; }
   body.idle #top { opacity: 0; }
   body.sp #snd { display: none; }
-  #leadBtn { display: none; } body.sp #leadBtn { display: block; }
   #frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: transparent; z-index: 2; }
   body.pc #frame { display: block; } body.pc #vinyl, body.pc #big, body.pc canvas#fx { display: none !important; }
   #styleBtn { display: none; } body.pc #styleBtn { display: block; }
@@ -284,16 +283,26 @@ function sndDelay() { // how far the sound coming out of the iPad lags behind th
 // The PC switches the feed to Spotify's "now playing" by itself. There is no sound to analyse then,
 // so the bars get a steady beat that follows the song position instead.
 const spMode = () => document.body.classList.contains('sp');
-let lyrLead = 0.5;
-try { const v = localStorage.getItem('wv-sp-lead'); if (v !== null && !isNaN(+v)) lyrLead = +v; } catch {}
-const leadNow = () => (spMode() && media.status === 'Playing' ? lyrLead : 0);
-function leadLabel() { $('leadBtn').textContent = '字幕 ' + (lyrLead > 0 ? '提前 ' : lyrLead < 0 ? '延後 ' : '') + (lyrLead ? Math.abs(lyrLead) + ' 秒' : '準時'); }
-function setLead(v) { lyrLead = v; try { localStorage.setItem('wv-sp-lead', String(v)); } catch {} leadLabel(); lastLine = -2; Hub.emitMedia(); }
+// Lyric timing, kept separately for "following Spotify" (its reported position runs a little late, so
+// the default is 0.5 s early) and for the PC feed (default on time). Positive = earlier, negative = later.
+const LEAD_DEF = { sp: 0.5, pc: 0 }, leads = {};
+for (const k of ['sp', 'pc']) { leads[k] = LEAD_DEF[k]; try { const v = localStorage.getItem('wv-' + k + '-lead'); if (v !== null && !isNaN(+v)) leads[k] = +v; } catch {} }
+const leadMode = () => (spMode() ? 'sp' : 'pc');
+const curLead = () => leads[leadMode()];
+const leadNow = () => (media.status === 'Playing' ? curLead() : 0);
+const leadText = (v) => (Math.abs(v) < 0.001 ? '準時' : (v > 0 ? '提前 ' : '延後 ') + +Math.abs(v).toFixed(2) + ' 秒');
+function leadLabel() { $('leadBtn').textContent = '字幕 ' + leadText(curLead()); }
+function setLead(v) {
+  v = Math.round(Math.max(-5, Math.min(5, v)) * 100) / 100;
+  leads[leadMode()] = v; try { localStorage.setItem('wv-' + leadMode() + '-lead', String(v)); } catch {}
+  leadLabel(); lastLine = -2; Hub.emitMedia();
+}
 function setSource() {
   const spm = media.source === 'spotify';
   if (spm !== document.body.classList.contains('sp')) {
     document.body.classList.toggle('sp', spm);
     if (spm && sndOn) sndStop();
+    leadLabel();
   }
   $('eyebrow').textContent = spm ? 'NOW PLAYING · ' + (media.device || 'SPOTIFY').toUpperCase() : 'NOW PLAYING';
 }
@@ -499,9 +508,16 @@ function renderMenu() {
   if (!$('menu').classList.contains('on')) return;
   let title, items, cur, pick;
   if (menuKind === 'lead') {
-    title = '字幕時間：iPad 的 Spotify 回報進度會慢一點，字幕對不上時調這裡';
-    items = [-0.5, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => [String(v), v > 0 ? '字幕早一點出來' : v < 0 ? '字幕晚一點出來' : '照 Spotify 的時間', v > 0 ? '提前 ' + v + ' 秒' : v < 0 ? '延後 ' + -v + ' 秒' : '準時']);
-    cur = String(lyrLead); pick = (k) => { setLead(+k); renderMenu(); };
+    const v = curLead();
+    title = '字幕時間：目前 ' + leadText(v) + (spMode() ? '（跟 Spotify）' : '（跟電腦）') + '。字幕太晚就提前，太早就延後。';
+    // fine steps first (relative), then fixed choices from 2 s later to 3 s earlier
+    const steps = [['d:-0.5', '再延後 0.5 秒'], ['d:-0.1', '再延後 0.1 秒'], ['d:0.1', '再提前 0.1 秒'], ['d:0.5', '再提前 0.5 秒']];
+    const fixed = [-2, -1.5, -1, -0.75, -0.5, -0.25, -0.1, 0, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
+    items = [...steps.map(([k, t]) => [k, '微調', t]),
+      ...fixed.map((x) => [String(x), x > 0 ? '字幕早一點出來' : x < 0 ? '字幕晚一點出來' : (spMode() ? '照 Spotify 的時間' : '照電腦的時間'), leadText(x)]),
+      ['reset', '回到這個模式的預設', '預設（' + leadText(LEAD_DEF[leadMode()]) + '）']];
+    cur = String(v);
+    pick = (k) => { if (k === 'reset') setLead(LEAD_DEF[leadMode()]); else if (k.startsWith('d:')) setLead(curLead() + +k.slice(2)); else setLead(+k); renderMenu(); };
   } else if (menuKind === 'view') { title = '選擇畫面'; items = VIEWS.map((v) => [v[0], v[2], v[1]]); cur = view; pick = (k) => { setView(k); closeMenu(); }; }
   else { const L = styleList(); if (!L) return closeMenu(); title = L.title; cur = L.cur; items = L.items.map(([n, d]) => [n, d, n]); pick = L.pick; }
   $('menuTitle').textContent = title;

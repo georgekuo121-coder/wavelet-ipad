@@ -144,10 +144,12 @@ const Stage = (() => {
         const ww = g.measureText(x.txt).width, gap = row.items.length ? fs * 0.22 : 0;
         if (row.items.length && row.width + gap + ww > maxW) { R.push(row); row = { items: [], width: 0, hgt: 0 }; }
         const g2 = row.items.length ? gap : 0;
-        row.items.push({ ...x, fs, x: row.width + g2, ww }); row.width += g2 + ww; row.hgt = Math.max(row.hgt, fs);
+        row.items.push({ ...x, fs, x: row.width + g2, ww }); row.width += g2 + ww; row.hgt = Math.max(row.hgt, fs); if (x.w.cjk) row.cjk = true;
       }
       if (row.items.length) R.push(row);
-      const tot = R.reduce((s, r) => s + r.hgt * 0.9, 0);
+      // Latin caps sit tight (0.9 of the size); CJK glyphs fill the whole em box, so their rows need more room
+      for (const r of R) { r.lead = r.hgt * (r.cjk ? 1.12 : 0.9); r.base = r.hgt * (r.cjk ? 0.88 : 0.8); }
+      const tot = R.reduce((s, r) => s + r.lead, 0);
       if (tot <= h * 0.86 || fit < 0.35) return { R, tot };
     }
   }
@@ -160,7 +162,7 @@ const Stage = (() => {
     const paint = (i, alpha, dy, live) => {
       const { R, tot } = lay(i); let y = (h - tot) / 2 + dy;
       for (const r of R) {
-        const by = y + r.hgt * 0.8;
+        const by = y + r.base;
         for (const it of r.items) {
           const f = live ? frac(it.w, pos) : 1, pop = live ? ease((pos - it.w.t) / 0.18) : 1;
           g.save(); g.globalAlpha = alpha * (f > 0 ? 1 : 0.22);
@@ -169,13 +171,13 @@ const Stage = (() => {
           if (f > 0) { g.shadowColor = rgba(o.text, 0.35); g.shadowBlur = it.fs * 0.15; }
           g.fillText(it.txt, x0 + it.x, by); g.restore();
         }
-        y += r.hgt * 0.9;
+        y += r.lead;
       }
     };
     // Hand-over in sequence so two text blocks never sit on top of each other: the old line lifts away
-    // and is gone by halfway, the new one only starts to show once the old is mostly out.
-    const u = (pos - L[li].t) / 0.45, out = ease(Math.min(1, u / 0.5)), inn = ease(Math.max(0, Math.min(1, (u - 0.35) / 0.65)));
-    if (u < 0.5 && L[li - 1]) paint(li - 1, 1 - out, -out * h * 0.18, false);
+    // first (0.2 s), and only once it is fully gone does the new one rise in.
+    const u = (pos - L[li].t) / 0.5, out = ease(Math.min(1, u / 0.4)), inn = ease(Math.max(0, Math.min(1, (u - 0.4) / 0.6)));
+    if (u < 0.4 && L[li - 1]) { paint(li - 1, 1 - out, -out * h * 0.18, false); return; } // strictly one after the other
     paint(li, inn, (1 - inn) * h * 0.06, true);
   }
   function flat(L) { const out = []; L.forEach((l, li) => l.words.forEach((w, wi) => out.push({ ...w, li, wi }))); return out; }
